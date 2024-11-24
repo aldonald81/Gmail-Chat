@@ -1,0 +1,23 @@
+.dashboard-container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 1rem;
+  }
+  
+  .email-grid {
+    display: grid;
+    gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  }
+  
+  @media (max-width: 640px) {
+    .dashboard-container {
+      padding: 0.5rem;
+    }
+  
+    .email-grid {
+      gap: 0.5rem;
+      grid-template-columns: 1fr; /* Stacks the cards vertically on small screens */
+    }
+  }
+  
