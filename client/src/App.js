@@ -1,11 +1,10 @@
-import logo from './logo.svg';
 import './App.css';
-import EmailDashboard from './containers/EmailDashboard';
+import ChatScreen from './screens/ChatScreen/ChatScreen';
 
 function App() {
   return (
     <div className="App">
-      <EmailDashboard />
+      <ChatScreen />
     </div>
   );
 }

@@ -1,219 +1,119 @@
-const { getOAuth2Client } = require('../services/googleService');
-const { google } = require('googleapis');
-const { getTokens } = require('../controllers/authController');
-const { htmlToText } = require('html-to-text');
+const { getOAuth2Client, runEmailQuery } = require("../services/googleService");
+const {
+  writeEmailQueryLLM,
+  orchestrateLLM,
+  runEmailSummary,
+} = require("../services/fireworks");
 
-// Function to recursively extract the email body
-const getEmailBody = (payload) => {
-  let body = '';
+// Fetch emails based on a user query
+const writeEmailQuery = async (req, res) => {
+  try {
+    const { userPrompt } = req.body;
+    console.log(userPrompt);
 
-  if (payload.parts) {
-    payload.parts.forEach((part) => {
-      if (part.parts) {
-        body += getEmailBody(part);
-      } else if (part.mimeType === 'text/plain' && part.body.data) {
-        body += Buffer.from(part.body.data, 'base64').toString('utf-8');
-      } else if (part.mimeType === 'text/html' && part.body.data) {
-        body += Buffer.from(part.body.data, 'base64').toString('utf-8');
+    // Write the query using your Fireworks service
+    const query = await writeEmailQueryLLM(userPrompt);
+
+    res.json({ query });
+  } catch (error) {
+    console.log("ERROR writing API query: " + error);
+  }
+};
+
+const markUnreadMessagesAsRead = async (req, res) => {
+  try {
+    const gmail = getGmailClient(req);
+
+    // Fetch unread messages
+    const response = await gmail.users.messages.list({
+      userId: "me",
+      maxResults: 100, // Adjust as needed
+      labelIds: ["INBOX", "UNREAD"], // Filter for unread messages in the inbox
+    });
+
+    if (!response.data.messages || response.data.messages.length === 0) {
+      return res.json({ message: "No unread messages found." });
+    }
+
+    // Mark each unread message as read
+    await Promise.all(
+      response.data.messages.map(async (message) => {
+        await gmail.users.messages.modify({
+          userId: "me",
+          id: message.id,
+          resource: {
+            removeLabelIds: ["UNREAD"], // Remove the UNREAD label
+          },
+        });
+      })
+    );
+
+    res.json({
+      message: `${response.data.messages.length} messages marked as read.`,
+    });
+  } catch (error) {
+    console.error("Error marking unread messages as read:", error);
+    if (error.message === "User is not authenticated") {
+      res.status(401).json({ error: "User is not authenticated" });
+    } else {
+      res.status(500).json({ error: "Failed to mark unread messages as read" });
+    }
+  }
+};
+
+const orchestrateResponse = async (req, res) => {
+  console.log("Orchestrating proper response");
+  try {
+    const { userPrompt, currentEmails, currentEmailsChats } = req.body;
+
+    // Write the query using your Fireworks service
+    const orchestrationResult = await orchestrateLLM(userPrompt);
+    console.log(orchestrationResult)
+
+    if (orchestrationResult["finish_reason"] == "tool_calls") {
+      console.log("Looping through tools")
+      for (const tool_call of orchestrationResult["message"]["tool_calls"]) {
+        const { name, arguments } = tool_call["function"];
+
+        const argumentsObj = JSON.parse(arguments);
+
+        if (name == "fetch_gmail_messages") {
+          console.log("QUERYING EMAILS");
+          var emails = await runEmailQuery(req, argumentsObj);
+        } else if (name == "respond_to_email_query") {
+          console.log("RESPONDING TO USER");
+          var assistantResponse = await runEmailSummary(
+            argumentsObj,
+            currentEmails,
+            currentEmailsChats
+          );
+        } else {
+          console.log("NO FUNCTION FOUND");
+        }
       }
-    });
-  } else if (payload.body && payload.body.data) {
-    body += Buffer.from(payload.body.data, 'base64').toString('utf-8');
-  }
-
-  return body;
-};
-
-// Fetch all emails from the Primary inbox
-const fetchAllEmails = async (req, res) => {
-  try {
-    const oauth2Client = getOAuth2Client();
-    const tokens = getTokens(); // Retrieve tokens
-    oauth2Client.setCredentials(tokens); // Set credentials on the client
-
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      maxResults: 200,
-      labelIds: ['INBOX', 'CATEGORY_PERSONAL'], // Only fetch emails from Primary inbox
-    });
-
-    if (!response.data.messages) {
-      return res.json([]);
     }
 
-    const emails = await Promise.all(
-      response.data.messages.map(async (message) => {
-        const email = await gmail.users.messages.get({
-          userId: 'me',
-          id: message.id,
-          format: 'full', // Ensure full email content is retrieved
-        });
-
-        const headers = email.data.payload.headers;
-        const subject = headers.find((h) => h.name === 'Subject')?.value;
-        const from = headers.find((h) => h.name === 'From')?.value;
-        const date = headers.find((h) => h.name === 'Date')?.value;
-
-        // Extract the body content
-        const body = getEmailBody(email.data.payload);
-
-        // Convert HTML to plain text and exclude links
-        const plainTextBody = htmlToText(body, {
-          wordwrap: 130,
-          selectors: [
-            { selector: 'a', format: 'skip' }, // Skip all anchor tags
-            { selector: 'img', format: 'skip' }, // Optionally skip images
-          ],
-        });
-
-        return {
-          id: email.data.id,
-          subject,
-          from,
-          date,
-          snippet: email.data.snippet,
-          body: plainTextBody, // Include the plain text body without links
-        };
-      })
-    );
-
-    res.json(emails);
-  } catch (error) {
-    console.error('Error fetching emails:', error);
-    res.status(500).json({ error: 'Failed to fetch emails' });
-  }
-};
-
-// Fetch unread emails from the Primary inbox
-const fetchUnreadEmails = async (req, res) => {
-  try {
-    const oauth2Client = getOAuth2Client();
-    const tokens = getTokens(); // Retrieve tokens
-    oauth2Client.setCredentials(tokens); // Set credentials on the client
-
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      maxResults: 200,
-      labelIds: ['INBOX', 'UNREAD', 'CATEGORY_PERSONAL'], // Unread emails in Primary inbox
-    });
-
-    if (!response.data.messages) {
-      return res.json([]);
+    if (emails) {
+      res.json({ type: "emails", emails });
+    } else if (assistantResponse) {
+      res.json({ type: "LLM", assistantResponse });
+    } else {
+      res.json({});
     }
-
-    const emails = await Promise.all(
-      response.data.messages.map(async (message) => {
-        const email = await gmail.users.messages.get({
-          userId: 'me',
-          id: message.id,
-          format: 'full', // Ensure full email content is retrieved
-        });
-
-        const headers = email.data.payload.headers;
-        const subject = headers.find((h) => h.name === 'Subject')?.value;
-        const from = headers.find((h) => h.name === 'From')?.value;
-        const date = headers.find((h) => h.name === 'Date')?.value;
-
-        // Extract the body content
-        const body = getEmailBody(email.data.payload);
-
-        // Convert HTML to plain text and exclude links
-        const plainTextBody = htmlToText(body, {
-          wordwrap: 130,
-          selectors: [
-            { selector: 'a', format: 'skip' }, // Skip all anchor tags
-            { selector: 'img', format: 'skip' }, // Optionally skip images
-          ],
-        });
-
-        return {
-          id: email.data.id,
-          subject,
-          from,
-          date,
-          snippet: email.data.snippet,
-          body: plainTextBody, // Include the plain text body without links
-        };
-      })
-    );
-
-    res.json(emails);
   } catch (error) {
-    console.error('Error fetching unread emails:', error);
-    res.status(500).json({ error: 'Failed to fetch unread emails' });
+    console.log("ERROR orchestrating the convo: " + error);
   }
 };
 
-// Fetch emails from the last 7 days in the Primary inbox
-const fetchRecentEmails = async (req, res) => {
-  try {
-    const oauth2Client = getOAuth2Client();
-    const tokens = getTokens(); // Retrieve tokens
-    oauth2Client.setCredentials(tokens); // Set credentials on the client
+const test = async (req, res) => {
+  const response = await orchestrateLLM("Modify all emails in the last 7");
 
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client });
-
-    // Calculate the timestamp for 7 days ago
-    const sevenDaysAgo = new Date();
-    sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-    const queryDate = Math.floor(sevenDaysAgo.getTime() / 1000);
-
-    const response = await gmail.users.messages.list({
-      userId: 'me',
-      maxResults: 200,
-      labelIds: ['INBOX',], // Only from Primary inbox
-      q: `after:${queryDate} -label:CATEGORY_SOCIAL -label:CATEGORY_PROMOTIONS -label:CATEGORY_UPDATES -label:CATEGORY_FORUMS`, // Fetch emails after this date
-    });
-
-    if (!response.data.messages) {
-      return res.json([]);
-    }
-
-    const emails = await Promise.all(
-      response.data.messages.map(async (message) => {
-        const email = await gmail.users.messages.get({
-          userId: 'me',
-          id: message.id,
-          format: 'full', // Ensure full email content is retrieved
-        });
-
-        const headers = email.data.payload.headers;
-        const subject = headers.find((h) => h.name === 'Subject')?.value;
-        const from = headers.find((h) => h.name === 'From')?.value;
-        const date = headers.find((h) => h.name === 'Date')?.value;
-
-        // Extract the body content
-        const body = getEmailBody(email.data.payload);
-
-        // Convert HTML to plain text and exclude links
-        const plainTextBody = htmlToText(body, {
-          wordwrap: 130,
-          selectors: [
-            { selector: 'a', format: 'skip' }, // Skip all anchor tags
-            { selector: 'img', format: 'skip' }, // Optionally skip images
-          ],
-        });
-
-        return {
-          id: email.data.id,
-          subject,
-          from,
-          date,
-          snippet: email.data.snippet,
-          body: plainTextBody, // Include the plain text body without links
-        };
-      })
-    );
-
-    res.json(emails);
-  } catch (error) {
-    console.error('Error fetching recent emails:', error);
-    res.status(500).json({ error: 'Failed to fetch recent emails' });
-  }
+  res.json(response);
 };
 
-module.exports = { fetchAllEmails, fetchUnreadEmails, fetchRecentEmails };
+module.exports = {
+  writeEmailQuery,
+  runEmailQuery,
+  orchestrateResponse,
+  test,
+};
