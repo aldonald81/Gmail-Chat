@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
-import AuthButton from '../AuthButton/AuthButton';
-import EmailCard from '../EmailCard/EmailCard';
+import AuthButton from '../../components/GoogleAuthButton';
+import EmailCard from '../../components/EmailCard';
 import './EmailDashboard.css';
 
 const EmailDashboard = () => {
