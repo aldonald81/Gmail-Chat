@@ -67,7 +67,7 @@ const orchestrateResponse = async (req, res) => {
     const { userPrompt, currentEmails, currentEmailsChats } = req.body;
 
     // Write the query using your Fireworks service
-    const orchestrationResult = await orchestrateLLM(userPrompt);
+    const orchestrationResult = await orchestrateLLM(userPrompt, currentEmails, currentEmailsChats);
     console.log(orchestrationResult)
 
     if (orchestrationResult["finish_reason"] == "tool_calls") {
@@ -98,7 +98,7 @@ const orchestrateResponse = async (req, res) => {
     } else if (assistantResponse) {
       res.json({ type: "LLM", assistantResponse });
     } else {
-      res.json({});
+      res.json({type: "LLM", assistantResponse: orchestrationResult['message']['content']});
     }
   } catch (error) {
     console.log("ERROR orchestrating the convo: " + error);

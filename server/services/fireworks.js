@@ -1,13 +1,13 @@
 const axios = require("axios");
 
-const orchestrateLLM = async (userInput) => {
+const orchestrateLLM = async (userInput, currentEmails, currentEmailsChats) => {
   try {
     const tools = [
       {
         type: "function",
         function: {
           name: "fetch_gmail_messages",
-          description: "Fetch messages from Gmail using specific query parameters.",
+          description: "Fetch new messages from Gmail using specific query parameters.",
           parameters: {
             type: "object",
             required: ["userId"],
@@ -38,40 +38,28 @@ const orchestrateLLM = async (userInput) => {
           },
         },
       },
-      {
-        type: "function",
-        function: {
-          name: "answer_user_questions",
-          description:
-            "Answers specific user questions about emails",
-          parameters: {
-            type: "object",
-            required: ["userPrompt"],
-            properties: {
-              userPrompt: {
-                type: "string",
-                description:
-                  "The question or prompt from the user regarding their emails. For example, 'Tell me about the email from Amazon' or 'Summarize my emails from the last week.'",
-              },
-            },
-          },
-        },
-      },
     ];
     
-    
+    const emails = await formatEmails(currentEmails)
+    const user_message = `Emails:\n ${emails}\n\nUser Prompt: ${userInput}`;
+
+    const messages = [
+      {
+        role: "system",
+        content: "You are an expert at answering questions based on a set of emails. Your response should satisfy the User Prompt. You have access to a set of tools that you can use to query Gmail to get emails when needed. ONLY use the fetch_gmail_messages tool function to query Gmail when the user explicity states that they want new emails or there are no emails present. Format responses using Markdown formatting standards.",
+      },
+      ...currentEmailsChats, 
+      {
+        role: "user",
+        content: user_message,
+      },
+    ]
 
     const payload = {
       model: "accounts/fireworks/models/firefunction-v2",
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are a helpful orchestrator assistant that chooses the correct tool call(s). Specify the tool call(s) necessary to complete their request. Don't worry about outputting text",
-        },
-        { role: "user", content: userInput },
-      ],
-      tools: tools, // Pass the function spec here
+      messages: messages,
+      tools: tools, 
+      temperature: .6
     };
 
     const response = await axios.post(
