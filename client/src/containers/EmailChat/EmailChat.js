@@ -56,14 +56,14 @@ const EmailChat = () => {
   return (
     <div className="chat-screen">
       <div className="chat-header">
-        <h1>Chat with AI</h1>
+        <h1>Chat with Gmail</h1>
       </div>
       <div className="chat-messages">
         {messages.map((message, index) => {
           if (message.type === "user" || message.type === "LLM") {
             return (
               <div
-                key={index}
+                key={index} 
                 className={`chat-message ${
                   message.type === "user" ? "chat-user" : "chat-bot"
                 }`}

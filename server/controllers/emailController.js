@@ -80,7 +80,7 @@ const orchestrateResponse = async (req, res) => {
         if (name == "fetch_gmail_messages") {
           console.log("QUERYING EMAILS");
           var emails = await runEmailQuery(req, argumentsObj);
-        } else if (name == "respond_to_email_query") {
+        } else if (name == "answer_user_questions") {
           console.log("RESPONDING TO USER");
           var assistantResponse = await runEmailSummary(
             argumentsObj,
@@ -98,7 +98,7 @@ const orchestrateResponse = async (req, res) => {
     } else if (assistantResponse) {
       res.json({ type: "LLM", assistantResponse });
     } else {
-      res.json({});
+      res.json({type: "LLM", assistantResponse: orchestrationResult['message']['content']});
     }
   } catch (error) {
     console.log("ERROR orchestrating the convo: " + error);

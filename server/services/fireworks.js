@@ -7,7 +7,8 @@ const orchestrateLLM = async (userInput) => {
         type: "function",
         function: {
           name: "fetch_gmail_messages",
-          description: "Fetch messages from Gmail using specific query parameters.",
+          description:
+            "Fetch messages from Gmail using specific query parameters. User must be explicit that they want you to pull emails",
           parameters: {
             type: "object",
             required: ["userId"],
@@ -43,7 +44,7 @@ const orchestrateLLM = async (userInput) => {
         function: {
           name: "answer_user_questions",
           description:
-            "Answers specific user questions about emails",
+            "Answers user questions about emails that have already been pulled.",
           parameters: {
             type: "object",
             required: ["userPrompt"],
@@ -58,8 +59,6 @@ const orchestrateLLM = async (userInput) => {
         },
       },
     ];
-    
-    
 
     const payload = {
       model: "accounts/fireworks/models/firefunction-v2",
@@ -67,11 +66,12 @@ const orchestrateLLM = async (userInput) => {
         {
           role: "system",
           content:
-            "You are a helpful orchestrator assistant that chooses the correct tool call(s). Specify the tool call(s) necessary to complete their request. Don't worry about outputting text",
+            "You are a helpful orchestrator assistant that chooses the correct tool call(s). Specify the tool call(s) necessary to complete their request. Don't worry about outputting text. If the user's wants to fetch emails from Gmail, you should use the fetch_gmail_messages function. In order to call fetch_gmail_messages, it must be clear that the user wants to fetch emails. If the user prompt indicates that they want to 'chat' with, summarize, or have questions about the current emails then you should call the answer_user_questions function. If you are not chooseing fetch_gmail_messages, you should choose answer_user_questions.",
         },
         { role: "user", content: userInput },
       ],
       tools: tools, // Pass the function spec here
+      temperature: 0.6,
     };
 
     const response = await axios.post(
@@ -115,7 +115,7 @@ const writeEmailQueryLLM = async (userPrompt) => {
     // Payload for the Fireworks API request
     const payload = {
       model: "accounts/fireworks/models/llama-v3p2-3b-instruct",
-      max_tokens: 4096,
+      max_tokens: 128000,
       top_p: 1,
       top_k: 40,
       presence_penalty: 0,
@@ -175,18 +175,22 @@ Email #${i + 1}:
 Subject: ${email.subject}
 From: ${email.from}
 Date: ${email.date}
-Body: ${email.snippet}
+Body: ${email.body}
 ---------------
 `;
   }
 
   return formattedString;
-}
+};
 
-const runEmailSummary = async (argumentsObj, currentEmails, currentEmailsChats) => {
+const runEmailSummary = async (
+  argumentsObj,
+  currentEmails,
+  currentEmailsChats
+) => {
   try {
     const userPrompt = argumentsObj["userPrompt"];
-    const emails = await formatEmails(currentEmails)
+    const emails = await formatEmails(currentEmails);
 
     const url = "https://api.fireworks.ai/inference/v1/chat/completions";
 
@@ -199,12 +203,12 @@ const runEmailSummary = async (argumentsObj, currentEmails, currentEmailsChats) 
         role: "system",
         content: system_message,
       },
-      ...currentEmailsChats, 
+      ...currentEmailsChats,
       {
         role: "user",
         content: user_message,
       },
-    ]
+    ];
 
     // Payload for the Fireworks API request
     const payload = {

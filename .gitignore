@@ -6,3 +6,5 @@
 # Dependency directories
 ./server/node_modules/
 ./gmail-app/node_modules/
+
+./scripts
